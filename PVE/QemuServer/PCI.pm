@@ -225,6 +225,21 @@ sub get_pci_addr_map {
     return $pci_addr_map;
 }
 
+my $consumer_mdev_map;
+sub get_consumer_mdev_map {
+	$consumer_mdev_map = {
+		"0x1b80" => "0x1bb0",
+		"0x1b06" => "0x1b30",
+		"0x1e04" => "0x1e30",
+		"0x1e07" => "0x1e30",
+		"0x1e82" => "0x1eb0",
+		"0x1e87" => "0x1eb0",
+		"0x1e89" => "0x1eb1",
+		"0x1e90" => "0x1eb0",
+	} if !defined($consumer_mdev_map);
+	return $consumer_mdev_map;
+}
+
 my sub generate_mdev_uuid {
     my ($vmid, $index) = @_;
     return sprintf("%08d-0000-0000-0000-%012d", $index, $vmid);
@@ -429,11 +444,40 @@ sub print_hostpci_devices {
 	    $gpu_passthrough = 1;
 	}
 
-	my $sysfspath;
+	my $mdev;
 	if ($d->{mdev} && scalar(@$pcidevices) == 1) {
 	    my $pci_id = $pcidevices->[0]->{id};
 	    my $uuid = generate_mdev_uuid($vmid, $i);
-	    $sysfspath = "/sys/bus/pci/devices/$pci_id/$uuid";
+		my $gpu_info = PVE::SysFSTools::lspci($pci_id, 1)->[0];
+		if ($gpu_info->{device_name} =~ /GTX/) {
+			# Some green company consumer grade GPU.
+			$mdev = {
+				"id"                  => "$id.0",
+				"bus"                 => get_pcie_addr_map()->{$id},
+				"pciaddr"             => "$pciaddr.0",
+				"mf_addr"             => "0.0",
+				"display"             => "off",
+				"x_pci_vendor_id"     => $gpu_info->{"vendor"},
+				"x_pci_device_id"     => get_consumer_mdev_map()->{$gpu_info->{"subsystem_device"}},
+				"x_pci_sub_vendor_id" => $gpu_info->{"subsystem_vendor"},
+				"x_pci_sub_device_id" => $gpu_info->{"subsystem_device"},
+			};
+
+			$mdev->{"vendor_info"} = "x-pci-vendor-id=$mdev->{x_pci_vendor_id}";
+			$mdev->{"vendor_info"} .= ",x-pci-device-id=$mdev->{x_pci_device_id}";
+			$mdev->{"vendor_info"} .= ",x-pci-sub-vendor-id=$mdev->{x_pci_sub_vendor_id}";
+			$mdev->{"vendor_info"} .= ",x-pci-sub-device-id=$mdev->{x_pci_sub_device_id}";
+
+			$mdev->{"full_string"} = ",sysfsdev=/sys/bus/mdev/devices/$uuid";
+			$mdev->{"full_string"} .= ",id=$mdev->{id},bus=$mdev->{pciaddr},addr=$mdev->{mf_addr}";
+			$mdev->{"full_string"} .= ",display=$mdev->{display}";
+			$mdev->{"full_string"} .= ",$mdev->{vendor_info}";
+
+		} else {
+			$mdev->{"full_string"} = ",sysfsdev=/sys/bus/pci/devices/$pci_id/$uuid";
+			$mdev->{"full_string"}  .= ",id=${id}0${pciaddr}0";
+		}
+
 	} elsif ($d->{mdev}) {
 	    warn "ignoring mediated device '$id' with multifunction device\n";
 	}
@@ -442,22 +486,22 @@ sub print_hostpci_devices {
 	foreach my $pcidevice (@$pcidevices) {
 	    my $devicestr = "vfio-pci";
 
-	    if ($sysfspath) {
-		$devicestr .= ",sysfsdev=$sysfspath";
+	    if ($mdev) {
+			$devicestr .= ",$mdev->{full_string}";
 	    } else {
-		$devicestr .= ",host=$pcidevice->{id}";
-	    }
+			$devicestr .= ",host=$pcidevice->{id}";
 
-	    my $mf_addr = $multifunction ? ".$j" : '';
-	    $devicestr .= ",id=${id}${mf_addr}${pciaddr}${mf_addr}";
+			my $mf_addr = $multifunction ? ".$j" : '';
+			$devicestr .= ",id=${id}${mf_addr}${pciaddr}${mf_addr}";
 
-	    if ($j == 0) {
-		$devicestr .= ',rombar=0' if defined($d->{rombar}) && !$d->{rombar};
-		$devicestr .= "$xvga";
-		$devicestr .= ",multifunction=on" if $multifunction;
-		$devicestr .= ",romfile=/usr/share/kvm/$d->{romfile}" if $d->{romfile};
-		$devicestr .= ",bootindex=$bootorder->{$id}" if $bootorder->{$id};
-	    }
+			if ($j == 0) {
+				$devicestr .= ',rombar=0' if defined($d->{rombar}) && !$d->{rombar};
+				$devicestr .= "$xvga";
+				$devicestr .= ",multifunction=on" if $multifunction;
+				$devicestr .= ",romfile=/usr/share/kvm/$d->{romfile}" if $d->{romfile};
+				$devicestr .= ",bootindex=$bootorder->{$id}" if $bootorder->{$id};
+			}
+		}
 
 	    push @$devices, '-device', $devicestr;
 	    $j++;
@@ -475,8 +519,9 @@ sub prepare_pci_device {
     die "no pci device info for device '$pciid'\n" if !$info;
 
     if ($mdev) {
-	my $uuid = generate_mdev_uuid($vmid, $index);
-	PVE::SysFSTools::pci_create_mdev_device($pciid, $uuid, $mdev);
+		my $uuid = generate_mdev_uuid($vmid, $index);
+		PVE::SysFSTools::pci_create_mdev_device($pciid, $uuid, $mdev);
+		return $uuid;
     } else {
 	die "can't unbind/bind PCI group to VFIO '$pciid'\n"
 	    if !PVE::SysFSTools::pci_dev_group_bind_to_vfio($pciid);

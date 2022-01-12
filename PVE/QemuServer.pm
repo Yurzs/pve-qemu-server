@@ -5525,7 +5525,10 @@ sub vm_start_nolock {
 	for my $id (sort keys %$pci_devices) {
 	    my $d = $pci_devices->{$id};
 	    for my $dev ($d->{pciid}->@*) {
-		PVE::QemuServer::PCI::prepare_pci_device($vmid, $dev->{id}, $id, $d->{mdev});
+			my $uuid = PVE::QemuServer::PCI::prepare_pci_device($vmid, $dev->{id}, $id, $d->{mdev});
+			if (PVE::SysFSTools::lspci($dev->{id}, 1)->{device_name} =~ /GTX/) {
+				push @$cmd, '-uuid', $uuid;
+			}
 	    }
 	}
     };
