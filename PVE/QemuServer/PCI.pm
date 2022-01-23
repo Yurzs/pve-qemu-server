@@ -411,7 +411,7 @@ sub get_consumer_mdev_map {
 		"0x1b38" => "0x1b38",
 		"0x1b70" => "0x1b38",
 		"0x1b78" => "0x1b38",
-		"0x1b80" => "0x1b38",
+		"0x1b80" => "0x1bb0",
 		"0x1b81" => "0x1b38",
 		"0x1b82" => "0x1b38",
 		"0x1b83" => "0x1b38",
@@ -744,7 +744,7 @@ sub print_hostpci_devices {
 
 		} else {
 			$mdev->{"full_string"} = "sysfsdev=/sys/bus/pci/devices/$pci_id/$uuid";
-			$mdev->{"full_string"}  .= ",id=${id}0${pciaddr}0";
+			$mdev->{"full_string"} .= ",id=${id}${pciaddr}";
 		}
 
 	} elsif ($d->{mdev}) {
