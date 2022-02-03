@@ -747,6 +747,10 @@ sub print_hostpci_devices {
 			$mdev->{"full_string"} .= ",id=${id}${pciaddr}";
 		}
 
+		if ($mdev->{"full_string"} =~ /(.*)/){
+			$mdev->{"full_string"} = $1;
+		}
+
 	} elsif ($d->{mdev}) {
 	    warn "ignoring mediated device '$id' with multifunction device\n";
 	}
